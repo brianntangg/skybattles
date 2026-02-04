@@ -38,6 +38,8 @@ const MAX_CONNECTIONS_PER_IP = 5;
 const INPUT_RATE_LIMIT_MS = 16; // ~60 inputs/sec max (game runs at 60fps)
 const RESPAWN_RATE_LIMIT_MS = 1000; // 1 respawn per second
 const READY_TOGGLE_RATE_LIMIT_MS = 500; // Prevent ready spam
+const ROOM_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes idle timeout
+const ROOM_CLEANUP_INTERVAL_MS = 60 * 1000; // Check for idle rooms every minute
 
 // Valid enum values for runtime validation
 const VALID_MOVEMENT_TYPES = Object.values(MovementType);
@@ -53,6 +55,29 @@ const connectionsPerIp = new Map<string, number>();
 const socketLastInput = new Map<string, number>();
 const socketLastRespawn = new Map<string, number>();
 const socketLastReady = new Map<string, number>();
+
+// Room activity tracking for idle timeout
+const roomLastActivity = new Map<string, number>();
+
+function updateRoomActivity(code: string): void {
+  roomLastActivity.set(code, Date.now());
+}
+
+function cleanupIdleRooms(): void {
+  const now = Date.now();
+  for (const [code, lastActivity] of roomLastActivity) {
+    if (now - lastActivity > ROOM_IDLE_TIMEOUT_MS) {
+      const room = rooms.get(code);
+      if (room) {
+        console.log(`Room ${code} timed out due to inactivity`);
+        io.to(code).emit('room:closed');
+        room.destroy();
+        rooms.delete(code);
+      }
+      roomLastActivity.delete(code);
+    }
+  }
+}
 
 // Validation helpers
 function isValidMovementType(value: unknown): value is MovementType {
@@ -75,8 +100,25 @@ function isValidInputState(input: unknown): input is InputState {
     typeof i.crouch === 'boolean' &&
     typeof i.shooting === 'boolean' &&
     typeof i.mouseAngle === 'number' &&
-    Number.isFinite(i.mouseAngle)
+    Number.isFinite(i.mouseAngle) &&
+    // Validate angle is within reasonable bounds (-2π to 2π)
+    i.mouseAngle >= -Math.PI * 2 &&
+    i.mouseAngle <= Math.PI * 2
   );
+}
+
+// Get client IP, handling X-Forwarded-For from proxies (Render, Cloudflare, etc.)
+function getClientIp(socket: Socket): string {
+  // Check X-Forwarded-For header (set by reverse proxies)
+  const forwardedFor = socket.handshake.headers['x-forwarded-for'];
+  if (forwardedFor) {
+    // X-Forwarded-For can be a comma-separated list; first IP is the client
+    const ips = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
+    const clientIp = ips.split(',')[0].trim();
+    if (clientIp) return clientIp;
+  }
+  // Fall back to direct connection address
+  return socket.handshake.address;
 }
 
 // CORS configuration
@@ -88,9 +130,8 @@ const getCorsOrigins = (): string[] | true => {
     return process.env.CORS_ORIGINS.split(',').map(s => s.trim());
   }
   if (process.env.NODE_ENV === 'production') {
-    // In production, allow same-origin (client served from same server)
-    // Return true to allow all origins, or specify your domain
-    return true;
+    // In production, only allow the official domain
+    return ['https://skybattles.onrender.com'];
   }
   // Development defaults
   return ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
@@ -126,12 +167,20 @@ function generateRoomCode(): string {
 function sanitizeName(name: unknown): string | null {
   if (typeof name !== 'string') return null;
 
+  // First, strip all Unicode control characters, zero-width chars, and directional overrides
+  // This prevents RTL attacks, invisible characters, and text spoofing
+  const stripped = name
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')  // Control characters
+    .replace(/[\u200B-\u200F\u2028-\u202F\uFEFF]/g, '')  // Zero-width and directional chars
+    .replace(/[\u2060-\u206F]/g, '');  // Word joiner and invisible chars
+
   // Trim and limit length
-  const trimmed = name.trim().slice(0, MAX_NAME_LENGTH);
+  const trimmed = stripped.trim().slice(0, MAX_NAME_LENGTH);
   if (trimmed.length === 0) return null;
 
-  // Remove potentially dangerous characters (keep alphanumeric, spaces, basic punctuation)
-  const sanitized = trimmed.replace(/[^\w\s\-_.]/g, '');
+  // Only allow ASCII alphanumeric, spaces, and basic punctuation
+  // This is more restrictive but prevents Unicode normalization attacks
+  const sanitized = trimmed.replace(/[^a-zA-Z0-9\s\-_.]/g, '');
   if (sanitized.length === 0) return null;
 
   return sanitized;
@@ -139,7 +188,7 @@ function sanitizeName(name: unknown): string | null {
 
 // Handle socket connections
 io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
-  const clientIp = socket.handshake.address;
+  const clientIp = getClientIp(socket);
 
   // Connection limit per IP
   const currentConnections = connectionsPerIp.get(clientIp) || 0;
@@ -161,8 +210,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
       return;
     }
 
-    // Rate limit room creation
-    const clientIp = socket.handshake.address;
+    // Rate limit room creation (uses clientIp from outer scope)
     const lastCreate = roomCreateCooldowns.get(clientIp) || 0;
     if (Date.now() - lastCreate < ROOM_CREATE_COOLDOWN_MS) {
       callback(null);
@@ -182,6 +230,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     const room = new GameRoom(code, socket.id, io);
     rooms.set(code, room);
     roomCreateCooldowns.set(clientIp, Date.now());
+    updateRoomActivity(code);
 
     room.addPlayer(socket.id, sanitizedName);
     playerRooms.set(socket.id, code);
@@ -229,6 +278,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     room.addPlayer(socket.id, sanitizedName);
     playerRooms.set(socket.id, code.toUpperCase());
     socket.join(code.toUpperCase());
+    updateRoomActivity(code.toUpperCase());
 
     console.log(`${sanitizedName} (${socket.id}) joined room ${code}`);
     callback(room.getInfo());
@@ -337,6 +387,7 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     const room = rooms.get(code);
     if (!room) return;
 
+    updateRoomActivity(code);
     room.handleInput(socket.id, input);
   });
 
@@ -404,6 +455,7 @@ function leaveCurrentRoom(socket: Socket) {
       io.to(code).emit('room:closed');
       room.destroy();
       rooms.delete(code);
+      roomLastActivity.delete(code);
       console.log(`Room ${code} destroyed (empty)`);
     } else {
       // If host left, assign new host
@@ -444,6 +496,9 @@ if (isProduction) {
     res.sendFile(path.join(clientPath, 'index.html'));
   });
 }
+
+// Start idle room cleanup interval
+setInterval(cleanupIdleRooms, ROOM_CLEANUP_INTERVAL_MS);
 
 // Start server
 httpServer.listen(PORT, () => {
