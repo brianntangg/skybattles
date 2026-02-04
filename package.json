@@ -1,0 +1,27 @@
+{
+  "name": "skybattles",
+  "version": "1.0.0",
+  "description": "Fast-paced 2D top-down PvP arena game with aerial combat",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "server": "tsx watch server/index.ts",
+    "start": "concurrently \"npm run server\" \"npm run dev\""
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "phaser": "^3.70.0",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "concurrently": "^8.2.2",
+    "tsx": "^4.6.2",
+    "typescript": "^5.3.2",
+    "vite": "^5.0.4"
+  }
+}
