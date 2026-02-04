@@ -34,6 +34,9 @@ import {
   KILL_LIMIT
 } from '../shared/constants';
 
+// Security: Max projectiles per player to prevent memory exhaustion
+const MAX_PROJECTILES_PER_PLAYER = 50;
+
 export class GameRoom {
   code: string;
   hostId: string;
@@ -407,6 +410,11 @@ export class GameRoom {
     const cooldown = 1000 / weaponStats.fireRate;
 
     if (now - lastShot < cooldown) return;
+
+    // Security: Limit projectiles per player to prevent memory exhaustion
+    const playerProjectileCount = Array.from(this.projectiles.values())
+      .filter(p => p.ownerId === player.id).length;
+    if (playerProjectileCount >= MAX_PROJECTILES_PER_PLAYER) return;
 
     this.lastShotTime.set(player.id, now);
     player.ammo--;

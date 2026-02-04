@@ -34,9 +34,50 @@ const httpServer = createServer(app);
 const MAX_ROOMS = 100;
 const MAX_NAME_LENGTH = 12;
 const ROOM_CREATE_COOLDOWN_MS = 5000;
+const MAX_CONNECTIONS_PER_IP = 5;
+const INPUT_RATE_LIMIT_MS = 16; // ~60 inputs/sec max (game runs at 60fps)
+const RESPAWN_RATE_LIMIT_MS = 1000; // 1 respawn per second
+const READY_TOGGLE_RATE_LIMIT_MS = 500; // Prevent ready spam
+
+// Valid enum values for runtime validation
+const VALID_MOVEMENT_TYPES = Object.values(MovementType);
+const VALID_WEAPON_TYPES = Object.values(WeaponType);
 
 // Rate limiting for room creation (per IP)
 const roomCreateCooldowns = new Map<string, number>();
+
+// Connection tracking per IP
+const connectionsPerIp = new Map<string, number>();
+
+// Per-socket rate limiting
+const socketLastInput = new Map<string, number>();
+const socketLastRespawn = new Map<string, number>();
+const socketLastReady = new Map<string, number>();
+
+// Validation helpers
+function isValidMovementType(value: unknown): value is MovementType {
+  return typeof value === 'string' && VALID_MOVEMENT_TYPES.includes(value as MovementType);
+}
+
+function isValidWeaponType(value: unknown): value is WeaponType {
+  return typeof value === 'string' && VALID_WEAPON_TYPES.includes(value as WeaponType);
+}
+
+function isValidInputState(input: unknown): input is InputState {
+  if (typeof input !== 'object' || input === null) return false;
+  const i = input as Record<string, unknown>;
+  return (
+    typeof i.up === 'boolean' &&
+    typeof i.down === 'boolean' &&
+    typeof i.left === 'boolean' &&
+    typeof i.right === 'boolean' &&
+    typeof i.jump === 'boolean' &&
+    typeof i.crouch === 'boolean' &&
+    typeof i.shooting === 'boolean' &&
+    typeof i.mouseAngle === 'number' &&
+    Number.isFinite(i.mouseAngle)
+  );
+}
 
 // CORS configuration
 // In production: client and server are same origin, so CORS is less restrictive
@@ -98,7 +139,18 @@ function sanitizeName(name: unknown): string | null {
 
 // Handle socket connections
 io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>) => {
-  console.log(`Player connected: ${socket.id}`);
+  const clientIp = socket.handshake.address;
+
+  // Connection limit per IP
+  const currentConnections = connectionsPerIp.get(clientIp) || 0;
+  if (currentConnections >= MAX_CONNECTIONS_PER_IP) {
+    console.log(`Connection rejected: IP ${clientIp} exceeded limit (${MAX_CONNECTIONS_PER_IP})`);
+    socket.disconnect(true);
+    return;
+  }
+  connectionsPerIp.set(clientIp, currentConnections + 1);
+
+  console.log(`Player connected: ${socket.id} (IP: ${clientIp}, connections: ${currentConnections + 1})`);
 
   // Create a new room
   socket.on('room:create', (name, callback) => {
@@ -192,6 +244,17 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // Toggle ready state
   socket.on('room:ready', (ready) => {
+    // Rate limit ready toggles
+    const now = Date.now();
+    const lastReady = socketLastReady.get(socket.id) || 0;
+    if (now - lastReady < READY_TOGGLE_RATE_LIMIT_MS) {
+      return;
+    }
+    socketLastReady.set(socket.id, now);
+
+    // Validate input
+    if (typeof ready !== 'boolean') return;
+
     const code = playerRooms.get(socket.id);
     if (!code) return;
 
@@ -225,6 +288,12 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // Set player loadout
   socket.on('player:loadout', (movement: MovementType, weapon: WeaponType) => {
+    // Validate enum values at runtime
+    if (!isValidMovementType(movement) || !isValidWeaponType(weapon)) {
+      console.log(`Invalid loadout from ${socket.id}: movement=${movement}, weapon=${weapon}`);
+      return;
+    }
+
     const code = playerRooms.get(socket.id);
     if (!code) return;
 
@@ -249,6 +318,19 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // Handle player input
   socket.on('player:input', (input: InputState) => {
+    // Rate limit inputs
+    const now = Date.now();
+    const lastInput = socketLastInput.get(socket.id) || 0;
+    if (now - lastInput < INPUT_RATE_LIMIT_MS) {
+      return; // Silently drop excessive inputs
+    }
+    socketLastInput.set(socket.id, now);
+
+    // Validate input structure
+    if (!isValidInputState(input)) {
+      return;
+    }
+
     const code = playerRooms.get(socket.id);
     if (!code) return;
 
@@ -260,6 +342,14 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
 
   // Handle respawn request
   socket.on('player:respawn', () => {
+    // Rate limit respawns
+    const now = Date.now();
+    const lastRespawn = socketLastRespawn.get(socket.id) || 0;
+    if (now - lastRespawn < RESPAWN_RATE_LIMIT_MS) {
+      return;
+    }
+    socketLastRespawn.set(socket.id, now);
+
     const code = playerRooms.get(socket.id);
     if (!code) return;
 
@@ -284,6 +374,19 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
   socket.on('disconnect', () => {
     console.log(`Player disconnected: ${socket.id}`);
     leaveCurrentRoom(socket);
+
+    // Decrement connection count for this IP
+    const currentCount = connectionsPerIp.get(clientIp) || 1;
+    if (currentCount <= 1) {
+      connectionsPerIp.delete(clientIp);
+    } else {
+      connectionsPerIp.set(clientIp, currentCount - 1);
+    }
+
+    // Clean up rate limiting maps
+    socketLastInput.delete(socket.id);
+    socketLastRespawn.delete(socket.id);
+    socketLastReady.delete(socket.id);
   });
 });
 
