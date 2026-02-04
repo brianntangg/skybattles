@@ -4,11 +4,12 @@ A fast-paced 2D top-down multiplayer PvP arena game built around vertical mobili
 
 ## Features
 
-- **4-Player Multiplayer**: Online matches with room codes
-- **4 Movement Types**: Wings, Fire Jetpack, Water Jetpack, Levitation
-- **4 Weapons**: Machine Gun, Pulse Laser, Sniper, Rocket
-- **5 Arena Maps**: Each favoring different playstyles
-- **Vertical Combat**: Z-axis movement with altitude affecting collisions
+- **4-Player Multiplayer**: Online matches with room codes, host controls, and rematch support
+- **Deathmatch Mode**: First to 11 kills wins
+- **4 Weapons**: Machine Gun, Pulse Laser, Sniper, Rocket Launcher
+- **Vertical Combat**: Z-axis movement (0-100 altitude) with altitude-based hit detection
+- **Dynamic Arena**: Breakable obstacles, elevated platforms, and strategic cover
+- **HUD Features**: Minimap, kill feed, ammo counter, and leaderboard
 
 ## Quick Start
 
@@ -48,7 +49,7 @@ npm run dev
 3. Share the 4-letter room code with friends
 4. Other players open the same URL and enter the room code
 5. Host clicks "START GAME" when ready (2+ players required)
-6. Select your movement type and weapon
+6. Select your weapon
 7. Battle!
 
 ## Controls
@@ -60,47 +61,28 @@ npm run dev
 | Shift      | Descend           |
 | Mouse      | Aim               |
 | Left Click | Shoot             |
+| R          | Reload            |
 
 ## Game Balance
 
-### Movement Types
-
-| Type              | Strengths                            | Weaknesses                             |
-| ----------------- | ------------------------------------ | -------------------------------------- |
-| **Wings**         | Fastest horizontal speed, no fuel    | Slow vertical climb, predictable glide |
-| **Fire Jetpack**  | Explosive vertical burst             | Burns fuel quickly, loud/visible       |
-| **Water Jetpack** | Balanced, can hover, fast fuel regen | Jack of all trades                     |
-| **Levitation**    | Perfect control, no fuel             | Slowest movement                       |
-
 ### Weapons
 
-| Weapon          | Damage | Fire Rate | Special                          |
-| --------------- | ------ | --------- | -------------------------------- |
-| **Machine Gun** | 8      | 10/sec    | High DPS at close range          |
-| **Pulse Laser** | 25     | 2/sec     | Pierces through enemies          |
-| **Sniper**      | 100    | 0.5/sec   | One-shot kill, hitscan           |
-| **Rocket**      | 50     | 1/sec     | Slow but powerful splash damage  |
+| Weapon          | Damage | Fire Rate | Clip | Reload | Special                 |
+| --------------- | ------ | --------- | ---- | ------ | ----------------------- |
+| **Machine Gun** | 8      | 10/sec    | 30   | 2.0s   | High DPS, slight spread |
+| **Pulse Laser** | 25     | 2/sec     | 8    | 1.5s   | Perfect accuracy        |
+| **Sniper**      | 100    | 0.5/sec   | 1    | 2.0s   | One-shot kill, hitscan  |
+| **Rocket**      | 50     | 1/sec     | 4    | 2.5s   | Projectile travel time  |
 
-### Arena Layout
+### Arena: Battle Arena
 
-```text
-         [TOP - The Towers]
-              Vertical focus
-                   |
-[LEFT - Cliffs]--[CENTER - Colosseum]--[RIGHT - The Maze]
-  High ground        Open arena           Cover-heavy
-                   |
-        [BOTTOM - The Tunnels]
-           Low ceiling corridors
-```
+A 1024x768 combat zone featuring:
 
-Each arena naturally favors different movement/weapon combinations:
-
-- **The Towers**: Fire Jetpack, Levitation thrive (vertical play)
-- **The Tunnels**: Wings, Water Jetpack excel (horizontal corridors)
-- **The Cliffs**: Sniper heaven with high ground advantage
-- **The Maze**: Machine Gun dominates (close quarters)
-- **The Colosseum**: All builds viable, pure skill determines winner
+- **Central Platform**: Elevated area (40-60 Z height) for high-ground advantage
+- **Corner Pillars**: 4 breakable obstacles (50 HP each) for destructible cover
+- **Mid-lane Barriers**: 2 breakable barriers for tactical positioning
+- **Central Obstacle**: Solid cover in the arena center
+- **4 Spawn Points**: One in each corner with 3-second spawn protection
 
 ## Architecture
 
@@ -150,34 +132,6 @@ npm start
 # Build for production
 npm run build
 ```
-
-## Deployment
-
-### Environment Variables
-
-| Variable       | Description                      | Default                  |
-|----------------|----------------------------------|--------------------------|
-| `PORT`         | Server port                      | `3000`                   |
-| `CORS_ORIGINS` | Comma-separated allowed origins  | `http://localhost:5173`  |
-
-### Hosting Example
-
-```bash
-# Build the client
-npm run build
-
-# Set environment variables for production
-export CORS_ORIGINS="https://yourdomain.com,https://www.yourdomain.com"
-
-# Run the server (serves from dist/)
-npm run server
-```
-
-For platforms like Railway, Render, or Fly.io:
-
-1. Set `CORS_ORIGINS` to your frontend URL
-2. The server runs on port 3000 by default
-3. Serve the `dist/` folder for the client (or use a CDN)
 
 ## License
 
