@@ -2,6 +2,10 @@
 
 A fast-paced 2D top-down multiplayer PvP arena game built around vertical mobility, aerial combat, and tactical arenas.
 
+## Live Demo
+
+Play now at: <https://skybattles.onrender.com>
+
 ## Features
 
 - **4-Player Multiplayer**: Online matches with room codes, host controls, and rematch support
