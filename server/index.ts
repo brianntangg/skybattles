@@ -6,6 +6,8 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { GameRoom } from './GameRoom';
 import {
   ClientToServerEvents,
@@ -14,7 +16,14 @@ import {
   WeaponType,
   InputState
 } from '../shared/types';
-import { SERVER_PORT, ROOM_CODE_LENGTH, MAX_PLAYERS } from '../shared/constants';
+import { ROOM_CODE_LENGTH, MAX_PLAYERS } from '../shared/constants';
+
+// ES module __dirname equivalent
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Port configuration - use PORT env var for cloud platforms (Render, Railway)
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 const app = express();
 const httpServer = createServer(app);
@@ -29,15 +38,27 @@ const ROOM_CREATE_COOLDOWN_MS = 5000;
 // Rate limiting for room creation (per IP)
 const roomCreateCooldowns = new Map<string, number>();
 
-// CORS origins - defaults to localhost, set CORS_ORIGINS env var for production
-const corsOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
-  : ['http://localhost:5173', 'http://127.0.0.1:5173'];
+// CORS configuration
+// In production: client and server are same origin, so CORS is less restrictive
+// In development: allow localhost Vite dev server
+// Can override with CORS_ORIGINS env var if needed
+const getCorsOrigins = (): string[] | true => {
+  if (process.env.CORS_ORIGINS) {
+    return process.env.CORS_ORIGINS.split(',').map(s => s.trim());
+  }
+  if (process.env.NODE_ENV === 'production') {
+    // In production, allow same-origin (client served from same server)
+    // Return true to allow all origins, or specify your domain
+    return true;
+  }
+  // Development defaults
+  return ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000'];
+};
 
 // Socket.IO server with CORS
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: corsOrigins,
+    origin: getCorsOrigins(),
     methods: ['GET', 'POST']
   }
 });
@@ -296,7 +317,35 @@ function leaveCurrentRoom(socket: Socket) {
   playerRooms.delete(socket.id);
 }
 
+// ===================
+// API ROUTES
+// ===================
+
+// Health check endpoint for load balancers
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok', rooms: rooms.size });
+});
+
+// ===================
+// PRODUCTION STATIC FILES
+// ===================
+const isProduction = process.env.NODE_ENV === 'production';
+
+if (isProduction) {
+  // Serve built client files from dist/client
+  const clientPath = path.join(__dirname, '../client');
+  app.use(express.static(clientPath));
+
+  // SPA wildcard - serve index.html for all non-API routes (must be last)
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(clientPath, 'index.html'));
+  });
+}
+
 // Start server
-httpServer.listen(SERVER_PORT, () => {
-  console.log(`Sky Battles server running on port ${SERVER_PORT}`);
+httpServer.listen(PORT, () => {
+  console.log(`Sky Battles server running on port ${PORT}`);
+  if (isProduction) {
+    console.log('Serving static files from dist/client');
+  }
 });
