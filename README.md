@@ -110,12 +110,354 @@ skybattles/
     └── constants.ts     # Game balance values
 ```
 
+---
+
+## How It Works
+
+This section explains the complete flow of the application from connection to gameplay.
+
+### System Architecture Overview
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              SKY BATTLES                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────────────┐                    ┌─────────────────────┐       │
+│   │   BROWSER CLIENT    │                    │      SERVER         │       │
+│   │   (Phaser 3 + TS)   │                    │   (Node.js + TS)    │       │
+│   │                     │                    │                     │       │
+│   │  ┌───────────────┐  │    WebSocket       │  ┌───────────────┐  │       │
+│   │  │ NetworkManager│◄─┼────────────────────┼─►│  Socket.IO    │  │       │
+│   │  └───────────────┘  │   (Socket.IO)      │  └───────────────┘  │       │
+│   │         │           │                    │         │           │       │
+│   │         ▼           │                    │         ▼           │       │
+│   │  ┌───────────────┐  │                    │  ┌───────────────┐  │       │
+│   │  │    Scenes     │  │                    │  │   GameRoom    │  │       │
+│   │  │  (Game UI)    │  │                    │  │ (Game Logic)  │  │       │
+│   │  └───────────────┘  │                    │  └───────────────┘  │       │
+│   │         │           │                    │         │           │       │
+│   │         ▼           │                    │         ▼           │       │
+│   │  ┌───────────────┐  │                    │  ┌───────────────┐  │       │
+│   │  │   Renderer    │  │                    │  │    Physics    │  │       │
+│   │  │  (Canvas 2D)  │  │                    │  │  (20Hz Loop)  │  │       │
+│   │  └───────────────┘  │                    │  └───────────────┘  │       │
+│   │                     │                    │                     │       │
+│   └─────────────────────┘                    └─────────────────────┘       │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────┐      │
+│   │                      SHARED CODE (TypeScript)                    │      │
+│   │   • types.ts - Game interfaces (PlayerState, ProjectileState)   │      │
+│   │   • constants.ts - Weapon stats, movement values, arena defs    │      │
+│   └─────────────────────────────────────────────────────────────────┘      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Client Scene Flow
+
+The game uses Phaser's scene system as a state machine:
+
+```text
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  BootScene   │────►│  MenuScene   │────►│  LobbyScene  │────►│ LoadoutScene │────►│  GameScene   │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+       │                    │                    │                    │                    │
+       ▼                    ▼                    ▼                    ▼                    ▼
+  • Connect to         • Enter name         • Display room       • Select weapon      • Render game
+    server             • Create room          code               • Click READY        • Handle input
+  • Show loading       • Join with code     • Show players       • Wait for all       • Show HUD
+  • Retry on fail      • Validate input     • Ready toggle         players            • Process state
+                                            • Host starts                              • Combat!
+```
+
+### Network Communication Flow
+
+The game uses a **server-authoritative** model where the server is the single source of truth:
+
+```text
+         CLIENT                                           SERVER
+           │                                                │
+           │  1. Connect (WebSocket handshake)              │
+           │───────────────────────────────────────────────►│
+           │                                                │
+           │  2. room:create / room:join                    │
+           │───────────────────────────────────────────────►│
+           │                          room:updated ◄────────│ Broadcast to room
+           │◄───────────────────────────────────────────────│
+           │                                                │
+           │  3. room:start (host only)                     │
+           │───────────────────────────────────────────────►│
+           │                         loadout:phase ◄────────│ All players
+           │◄───────────────────────────────────────────────│
+           │                                                │
+           │  4. player:loadout (weapon choice)             │
+           │───────────────────────────────────────────────►│
+           │  5. player:loadoutReady                        │
+           │───────────────────────────────────────────────►│
+           │                                                │
+           │                    game:starting(3,2,1) ◄──────│ Countdown
+           │◄───────────────────────────────────────────────│
+           │                        game:started ◄──────────│ Game begins!
+           │◄───────────────────────────────────────────────│
+           │                                                │
+     ┌─────┴─────────────── GAME LOOP (20Hz) ───────────────┴─────┐
+     │     │                                                │     │
+     │     │  player:input (WASD, mouse, shooting)          │     │
+     │     │───────────────────────────────────────────────►│     │
+     │     │                   ┌─────────────────────┐      │     │
+     │     │                   │ Server processes:   │      │     │
+     │     │                   │ • Apply movement    │      │     │
+     │     │                   │ • Update projectiles│      │     │
+     │     │                   │ • Check collisions  │      │     │
+     │     │                   │ • Calculate damage  │      │     │
+     │     │                   └─────────────────────┘      │     │
+     │     │                                                │     │
+     │     │                      game:state ◄──────────────│     │ Broadcast
+     │     │◄───────────────────────────────────────────────│     │ every 50ms
+     │     │                                                │     │
+     │     │                      game:hit ◄────────────────│     │ On damage
+     │     │◄───────────────────────────────────────────────│     │
+     │     │                      game:kill ◄───────────────│     │ On kill
+     │     │◄───────────────────────────────────────────────│     │
+     └─────┴────────────────────────────────────────────────┴─────┘
+           │                                                │
+           │                      game:ended ◄──────────────│ Winner!
+           │◄───────────────────────────────────────────────│
+           │                                                │
+```
+
+### Server Game Loop (20Hz)
+
+Every 50 milliseconds, the server executes this loop:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SERVER GAME LOOP (every 50ms)                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌─────────────────────────────────┐
+                    │    1. UPDATE PLAYERS            │
+                    │    ─────────────────────────    │
+                    │    For each player:             │
+                    │    • Read stored input          │
+                    │    • Apply acceleration         │
+                    │    • Handle Z-axis (altitude)   │
+                    │    • Apply gravity/fuel         │
+                    │    • Check wall collisions      │
+                    │    • Process shooting           │
+                    └─────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌─────────────────────────────────┐
+                    │    2. UPDATE PROJECTILES        │
+                    │    ─────────────────────────    │
+                    │    For each projectile:         │
+                    │    • Move by velocity           │
+                    │    • Check lifetime (max 5s)    │
+                    │    • Wall collision → destroy   │
+                    │    • Obstacle hit → damage it   │
+                    └─────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌─────────────────────────────────┐
+                    │    3. CHECK COLLISIONS          │
+                    │    ─────────────────────────    │
+                    │    For each projectile:         │
+                    │    • Check against all players  │
+                    │    • Circle collision detection │
+                    │    • Z-tolerance check (±15)    │
+                    │    • Apply damage if hit        │
+                    │    • Track kills/deaths         │
+                    │    • Check win condition (11)   │
+                    └─────────────────────────────────┘
+                                      │
+                                      ▼
+                    ┌─────────────────────────────────┐
+                    │    4. BROADCAST STATE           │
+                    │    ─────────────────────────    │
+                    │    Send to all players:         │
+                    │    • All player positions/HP    │
+                    │    • All projectile positions   │
+                    │    • All obstacle states        │
+                    │    • Tick number & timestamp    │
+                    └─────────────────────────────────┘
+                                      │
+                                      ▼
+                              (repeat every 50ms)
+```
+
+### Client Rendering Flow
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CLIENT RENDER LOOP (60fps)                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+          ┌───────────────────────────┴───────────────────────────┐
+          │                                                       │
+          ▼                                                       ▼
+┌─────────────────────┐                             ┌─────────────────────┐
+│   RECEIVE STATE     │                             │   CAPTURE INPUT     │
+│   from server       │                             │   from player       │
+│   (game:state)      │                             │   (keyboard/mouse)  │
+└─────────────────────┘                             └─────────────────────┘
+          │                                                       │
+          ▼                                                       ▼
+┌─────────────────────┐                             ┌─────────────────────┐
+│   INTERPOLATE       │                             │   SEND INPUT        │
+│   positions between │                             │   to server (20Hz)  │
+│   previous & current│                             │   (player:input)    │
+└─────────────────────┘                             └─────────────────────┘
+          │
+          ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              RENDER FRAME                                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │   Arena     │  │   Players   │  │ Projectiles │  │        HUD          │ │
+│  │  ─────────  │  │  ─────────  │  │  ─────────  │  │  ─────────────────  │ │
+│  │ • Walls     │  │ • Sprites   │  │ • Bullets   │  │ • Minimap           │ │
+│  │ • Platforms │  │ • Shadows   │  │ • Rockets   │  │ • Kill feed         │ │
+│  │ • Obstacles │  │ • HP bars   │  │ • Lasers    │  │ • Ammo counter      │ │
+│  │             │  │ • Names     │  │ • Trails    │  │ • Leaderboard       │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Weapon Systems
+
+The game implements two types of weapons:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           WEAPON TYPES                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   PROJECTILE WEAPONS (Machine Gun, Pulse Laser, Rocket)                     │
+│   ─────────────────────────────────────────────────────                     │
+│                                                                             │
+│      Player ──► Spawn Projectile ──► Travel at speed ──► Hit Detection     │
+│         │              │                    │                   │           │
+│         │              ▼                    ▼                   ▼           │
+│         │        Position at           Update each         On collision:    │
+│         │        gun barrel            tick (50ms)         • Wall: destroy  │
+│         │                                                  • Player: damage │
+│         │                                                  • Obstacle: dmg  │
+│                                                                             │
+│   HITSCAN WEAPON (Sniper)                                                   │
+│   ───────────────────────                                                   │
+│                                                                             │
+│      Player ──► Instant Raycast ──► Check intersections ──► Apply damage   │
+│         │              │                    │                   │           │
+│         │              ▼                    ▼                   ▼           │
+│         │        Ray from gun         1. Walls (block)     Damage first    │
+│         │        to max range         2. Obstacles (dmg)   player hit      │
+│         │                             3. Players (hit)                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Z-Axis (Altitude) System
+
+```text
+                          Z = 100 (ceiling)
+                               │
+    ┌──────────────────────────┼──────────────────────────┐
+    │                          │                          │
+    │   ✈ Player at Z=80       │      Projectile at Z=75  │   ← Can hit! (within ±15)
+    │                          │                          │
+    │──────────────────────────┼──────────────────────────│   Z = 60 (platform top)
+    │                          │                          │
+    │   █████████████████████████████████████████████████ │   ← Elevated Platform
+    │                          │                          │
+    │──────────────────────────┼──────────────────────────│   Z = 40 (platform base)
+    │                          │                          │
+    │                          │      Projectile at Z=20  │   ← Miss! (too low)
+    │   ✈ Player at Z=30       │                          │
+    │                          │                          │
+    └──────────────────────────┼──────────────────────────┘
+                               │
+                          Z = 0 (ground)
+
+    Hit Detection: |target.z - projectile.z| <= 15
+```
+
+### Data Flow Summary
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    COMPLETE DATA FLOW                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   INPUT (Client → Server)                                                   │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │  {                                                                   │  │
+│   │    up: boolean,        // W key                                      │  │
+│   │    down: boolean,      // S key                                      │  │
+│   │    left: boolean,      // A key                                      │  │
+│   │    right: boolean,     // D key                                      │  │
+│   │    jump: boolean,      // Space (ascend)                             │  │
+│   │    crouch: boolean,    // Shift (descend)                            │  │
+│   │    shooting: boolean,  // Mouse button                               │  │
+│   │    mouseAngle: number  // Aim direction (radians)                    │  │
+│   │  }                                                                   │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                      │                                      │
+│                                      ▼                                      │
+│                            SERVER PROCESSES                                 │
+│                                      │                                      │
+│                                      ▼                                      │
+│   GAME STATE (Server → Client)                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐  │
+│   │  {                                                                   │  │
+│   │    players: [{                                                       │  │
+│   │      id, name, x, y, z, angle, health, kills, deaths,               │  │
+│   │      velocityX, velocityY, ammo, isReloading, hasSpawnProtection    │  │
+│   │    }, ...],                                                          │  │
+│   │    projectiles: [{ id, x, y, z, angle, speed, damage, ownerId }],   │  │
+│   │    obstacles: [{ id, x, y, health, maxHealth }],                     │  │
+│   │    tick: number,                                                     │  │
+│   │    timestamp: number                                                 │  │
+│   │  }                                                                   │  │
+│   └─────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Security Model
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         SECURITY MEASURES                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐        │
+│   │  CONNECTION     │    │  INPUT          │    │  GAME           │        │
+│   │  LIMITS         │    │  VALIDATION     │    │  LIMITS         │        │
+│   │  ─────────────  │    │  ─────────────  │    │  ─────────────  │        │
+│   │  • 5 per IP     │    │  • Rate limit   │    │  • 50 bullets   │        │
+│   │  • CORS check   │    │  • Type check   │    │    per player   │        │
+│   │  • 100 max rooms│    │  • Range check  │    │  • 30min idle   │        │
+│   │                 │    │  • Sanitize     │    │    timeout      │        │
+│   └─────────────────┘    └─────────────────┘    └─────────────────┘        │
+│                                                                             │
+│   WHY SERVER-AUTHORITATIVE?                                                 │
+│   ─────────────────────────                                                 │
+│   • Client only sends INPUT, never game state                               │
+│   • Server calculates ALL physics and damage                                │
+│   • Prevents speed hacks, damage hacks, teleporting                         │
+│   • Client can't claim hits - server validates everything                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
 ### Networking
 
 - **Server-Authoritative**: Server validates all actions
 - **20Hz Tick Rate**: State broadcast every 50ms
-- **Client Prediction**: Local movement is predicted
-- **Interpolation**: Remote players smoothly interpolated
+- **Client Interpolation**: Remote players smoothly interpolated between states
+- **WebSocket Protocol**: Socket.IO for reliable real-time communication
 
 ## Tech Stack
 
