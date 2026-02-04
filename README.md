@@ -43,7 +43,7 @@ npm run dev
 
 ### Playing
 
-1. Open http://localhost:5173 in your browser
+1. Open <http://localhost:5173> in your browser
 2. Enter your name and click "CREATE ROOM"
 3. Share the 4-letter room code with friends
 4. Other players open the same URL and enter the room code
@@ -53,37 +53,37 @@ npm run dev
 
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| W/A/S/D | Move horizontally |
-| Space | Ascend |
-| Shift | Descend |
-| Mouse | Aim |
-| Left Click | Shoot |
+| Key        | Action            |
+| ---------- | ----------------- |
+| W/A/S/D    | Move horizontally |
+| Space      | Ascend            |
+| Shift      | Descend           |
+| Mouse      | Aim               |
+| Left Click | Shoot             |
 
 ## Game Balance
 
 ### Movement Types
 
-| Type | Strengths | Weaknesses |
-|------|-----------|------------|
-| **Wings** | Fastest horizontal speed, no fuel | Slow vertical climb, predictable glide |
-| **Fire Jetpack** | Explosive vertical burst | Burns fuel quickly, loud/visible |
-| **Water Jetpack** | Balanced, can hover, fast fuel regen | Jack of all trades |
-| **Levitation** | Perfect control, no fuel | Slowest movement |
+| Type              | Strengths                            | Weaknesses                             |
+| ----------------- | ------------------------------------ | -------------------------------------- |
+| **Wings**         | Fastest horizontal speed, no fuel    | Slow vertical climb, predictable glide |
+| **Fire Jetpack**  | Explosive vertical burst             | Burns fuel quickly, loud/visible       |
+| **Water Jetpack** | Balanced, can hover, fast fuel regen | Jack of all trades                     |
+| **Levitation**    | Perfect control, no fuel             | Slowest movement                       |
 
 ### Weapons
 
-| Weapon | Damage | Fire Rate | Special |
-|--------|--------|-----------|---------|
-| **Machine Gun** | 8 | 10/sec | High DPS at close range |
-| **Pulse Laser** | 25 | 2/sec | Pierces through enemies |
-| **Sniper** | 100 | 0.5/sec | One-shot kill, hitscan |
-| **Rocket** | 50 | 1/sec | Slow but powerful splash damage |
+| Weapon          | Damage | Fire Rate | Special                          |
+| --------------- | ------ | --------- | -------------------------------- |
+| **Machine Gun** | 8      | 10/sec    | High DPS at close range          |
+| **Pulse Laser** | 25     | 2/sec     | Pierces through enemies          |
+| **Sniper**      | 100    | 0.5/sec   | One-shot kill, hitscan           |
+| **Rocket**      | 50     | 1/sec     | Slow but powerful splash damage  |
 
 ### Arena Layout
 
-```
+```text
          [TOP - The Towers]
               Vertical focus
                    |
@@ -104,7 +104,7 @@ Each arena naturally favors different movement/weapon combinations:
 
 ## Architecture
 
-```
+```text
 skybattles/
 ├── server/              # Game server (Socket.IO)
 │   ├── index.ts         # Server entry, connection handling
