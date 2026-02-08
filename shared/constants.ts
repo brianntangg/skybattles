@@ -24,6 +24,7 @@ export const MAX_Z = 100;
 export const DEFAULT_Z = 20;
 export const Z_HIT_TOLERANCE = 15;  // Players within ±15 z-units can hit each other
 export const GRAVITY = 0.5;  // Z fall rate per tick when not thrusting
+export const WALL_MAX_Z = 80;  // Walls extend up to this altitude; players above can fly over
 
 // ===================
 // MOVEMENT STATS

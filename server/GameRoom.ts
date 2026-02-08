@@ -31,7 +31,8 @@ import {
   MAX_Z,
   Z_HIT_TOLERANCE,
   GRAVITY,
-  KILL_LIMIT
+  KILL_LIMIT,
+  WALL_MAX_Z
 } from '../shared/constants';
 
 // Security: Max projectiles per player to prevent memory exhaustion
@@ -383,15 +384,17 @@ export class GameRoom {
     player.x = Math.max(PLAYER_RADIUS, Math.min(arena.width - PLAYER_RADIUS, player.x));
     player.y = Math.max(PLAYER_RADIUS, Math.min(arena.height - PLAYER_RADIUS, player.y));
 
-    // Wall collision
-    for (const wall of arena.walls) {
-      if (this.rectCircleCollision(wall, player.x, player.y, PLAYER_RADIUS)) {
-        // Push player out of wall
-        const centerX = wall.x + wall.width / 2;
-        const centerY = wall.y + wall.height / 2;
-        const angle = Math.atan2(player.y - centerY, player.x - centerX);
-        player.x = centerX + Math.cos(angle) * (wall.width / 2 + PLAYER_RADIUS + 1);
-        player.y = centerY + Math.sin(angle) * (wall.height / 2 + PLAYER_RADIUS + 1);
+    // Wall collision — players flying above WALL_MAX_Z can pass over walls
+    if (player.z <= WALL_MAX_Z) {
+      for (const wall of arena.walls) {
+        if (this.rectCircleCollision(wall, player.x, player.y, PLAYER_RADIUS)) {
+          // Push player out of wall
+          const centerX = wall.x + wall.width / 2;
+          const centerY = wall.y + wall.height / 2;
+          const angle = Math.atan2(player.y - centerY, player.x - centerX);
+          player.x = centerX + Math.cos(angle) * (wall.width / 2 + PLAYER_RADIUS + 1);
+          player.y = centerY + Math.sin(angle) * (wall.height / 2 + PLAYER_RADIUS + 1);
+        }
       }
     }
 
@@ -711,6 +714,8 @@ export class GameRoom {
     this.gameStarted = false;
     this.inLoadoutPhase = false;
     this.countdownStarted = false;
+    this.tick = 0;
+    this.projectileIdCounter = 0;
     this.players.clear();
     this.projectiles.clear();
     this.obstacles.clear();

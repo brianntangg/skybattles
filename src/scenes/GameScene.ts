@@ -83,6 +83,9 @@ export class GameScene extends Phaser.Scene {
   private previousState: GameState | null = null;
   private interpolationAlpha = 0;
 
+  // Suppress shooting briefly after respawn so the click doesn't fire
+  private respawnClickCooldown = 0;
+
   constructor() {
     super({ key: 'GameScene' });
   }
@@ -124,6 +127,9 @@ export class GameScene extends Phaser.Scene {
     this.minimapGraphics = this.add.graphics();
     this.hitscanGraphics = this.add.graphics();
     this.hitscanGraphics.setDepth(50);
+
+    // Draw the default arena immediately so the screen is never blank
+    this.drawArenaStatic(ArenaId.CENTER);
 
     // Create HUD
     this.createHUD();
@@ -259,7 +265,7 @@ export class GameScene extends Phaser.Scene {
       right: this.wasd.D.isDown || this.cursors.right.isDown,
       jump: this.spaceKey!.isDown,
       crouch: this.shiftKey!.isDown,
-      shooting: pointer.isDown,
+      shooting: pointer.isDown && Date.now() > this.respawnClickCooldown,
       mouseAngle,
       timestamp: Date.now(),
       sequence: this.inputSequence++
@@ -736,6 +742,7 @@ export class GameScene extends Phaser.Scene {
     button.on('pointerout', () => button.setColor('#3498db'));
     button.on('pointerdown', () => {
       networkManager.requestRespawn();
+      this.respawnClickCooldown = Date.now() + 300;
     });
 
     const container = this.add.container(x, y, [bg, label, button]);
@@ -869,8 +876,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showGameEnded(data: { winnerId: string; scores: Record<string, { kills: number; deaths: number }> }): void {
-    // Stop sending input
+    // Disconnect all game callbacks so no stale events fire on a dead scene
     networkManager.onGameState = null;
+    networkManager.onGameHit = null;
+    networkManager.onGameKill = null;
+    networkManager.onGameEnded = null;
+    networkManager.onGameHitscan = null;
 
     const width = this.cameras.main.width;
     const height = this.cameras.main.height;
@@ -941,11 +952,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   shutdown(): void {
-    // Clean up network callbacks
+    // Clean up ALL network callbacks this scene may have set
     networkManager.onGameState = null;
     networkManager.onGameHit = null;
     networkManager.onGameKill = null;
     networkManager.onGameEnded = null;
+    networkManager.onGameHitscan = null;
+    networkManager.onRoomUpdated = null;
 
     // Clean up sprites
     for (const sprite of this.playerSprites.values()) {
